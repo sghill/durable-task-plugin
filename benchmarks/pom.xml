@@ -220,6 +220,8 @@
                                 <argument>-wi</argument><argument>${benchmark.wi}</argument>
                                 <argument>-i</argument><argument>${benchmark.i}</argument>
                                 <argument>-foe</argument><argument>true</argument>
+                                <argument>-rf</argument><argument>json</argument>
+                                <argument>-rff</argument><argument>target/results.json</argument>
                                 <!-- Pass byte-buddy-agent to each forked JVM so Mockito's inline
                                      mock maker does not need to self-attach (deprecated on JDK 21+).
                                      The property is set by maven-dependency-plugin:properties above. -->
