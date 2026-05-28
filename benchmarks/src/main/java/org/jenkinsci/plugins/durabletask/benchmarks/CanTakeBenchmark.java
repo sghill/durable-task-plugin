@@ -30,6 +30,7 @@ import hudson.model.Queue;
 import hudson.model.ResourceList;
 import hudson.model.queue.AbstractQueueTask;
 import hudson.model.queue.SubTask;
+import org.apache.logging.log4j.jul.Log4jBridgeHandler;
 import org.jenkinsci.plugins.durabletask.executors.ContinuedTask;
 import org.mockito.MockedStatic;
 import org.openjdk.jmh.annotations.Benchmark;
@@ -56,23 +57,23 @@ import java.util.Calendar;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
-import java.util.logging.Logger;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
 
 /**
- * Benchmarks {@link ContinuedTask.Scheduler#canTake} under a large queue.
+ * Benchmarks {@link ContinuedTask.Scheduler#canTake} under a large queue with the
+ * log4j2-JUL bridge active at INFO level, reproducing the production performance
+ * problem where {@code LOGGER.finer} calls in the queue-scan loop are expensive
+ * even though nothing is listening below INFO.
  *
- * <p>Two scenarios are measured:
+ * <p>Two scenarios:
  * <ul>
- *   <li><b>allRegular</b> – queue contains only non-continued items; every iteration
- *       walks the full list and emits a {@code LOGGER.finer} call per item. This is
- *       the hot path that degrades with 1000+ FreeStyleProjects.</li>
- *   <li><b>oneContinued</b> – one continued item sits at the front of the queue;
- *       {@code canTake} returns a {@link hudson.model.queue.CauseOfBlockage} after
- *       the first match, exercising the early-exit path.</li>
+ *   <li><b>allRegular</b> – queue of N non-continued items; {@code canTake} walks
+ *       the full list and hits {@code LOGGER.finer} once per item.</li>
+ *   <li><b>oneContinued</b> – one continued item at the front; {@code canTake}
+ *       returns after the first match without scanning the rest of the list.</li>
  * </ul>
  *
  * <p>Run via Maven:
@@ -100,18 +101,6 @@ public class CanTakeBenchmark {
     @Param({"100", "500", "1000", "2000"})
     public int queueSize;
 
-    /**
-     * JUL log level applied to the root logger for the duration of the trial.
-     * <ul>
-     *   <li>{@code OFF} – measures pure scheduler logic with no logging overhead.</li>
-     *   <li>{@code FINER} – reproduces the production scenario: every non-continued
-     *       item in the queue causes a {@code LOGGER.finer} call whose supplier lambda
-     *       is evaluated even when a log4j2-JUL bridge is not listening below INFO.</li>
-     * </ul>
-     */
-    @Param({"OFF", "FINER"})
-    public String logLevel;
-
     // -------------------------------------------------------------------------
     // State
     // -------------------------------------------------------------------------
@@ -133,7 +122,10 @@ public class CanTakeBenchmark {
 
     @Setup(Level.Trial)
     public void setUp() throws Exception {
-        Logger.getLogger("").setLevel(java.util.logging.Level.parse(logLevel));
+        // Install the log4j2-JUL bridge so all JUL records are routed through log4j2.
+        // log4j2.xml configures the root logger at INFO, matching the production setup
+        // where FINER records are discarded but the bridge overhead is still paid.
+        Log4jBridgeHandler.install(true, null, true);
 
         scheduler = new ContinuedTask.Scheduler();
         node = mock(Node.class);

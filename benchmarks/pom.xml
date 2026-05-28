@@ -28,6 +28,7 @@
         <jmh.version>1.37</jmh.version>
         <mockito.version>5.18.0</mockito.version>
         <byte-buddy.version>1.17.5</byte-buddy.version>
+        <log4j2.version>2.26.0</log4j2.version>
         <!-- JMH run defaults; override with -Dbenchmark.f=2 -Dbenchmark.wi=5 -Dbenchmark.i=10 -->
         <benchmark.f>1</benchmark.f>
         <benchmark.wi>3</benchmark.wi>
@@ -87,11 +88,17 @@
             <version>${mockito.version}</version>
         </dependency>
 
-        <!-- Silence SLF4J "no providers" warning in the forked benchmark JVM -->
+        <!-- log4j2 JUL bridge: routes JUL records into log4j2, reproducing the
+             production setup where a log4j2-JUL bridge is active at INFO level. -->
         <dependency>
-            <groupId>org.slf4j</groupId>
-            <artifactId>slf4j-simple</artifactId>
-            <version>2.0.17</version>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-jul</artifactId>
+            <version>${log4j2.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-core</artifactId>
+            <version>${log4j2.version}</version>
         </dependency>
     </dependencies>
 

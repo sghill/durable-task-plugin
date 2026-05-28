@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN">
+    <!--
+        Reproduces the production scenario: log4j2 is active but only listening at
+        INFO level. JUL FINER records are routed here via log4j-jul and discarded,
+        but the bridge overhead (level translation, logger lookup) is still paid.
+    -->
+    <Appenders>
+        <Null name="Null"/>
+    </Appenders>
+    <Loggers>
+        <Root level="INFO">
+            <AppenderRef ref="Null"/>
+        </Root>
+    </Loggers>
+</Configuration>
