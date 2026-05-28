@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!--
+        Standalone benchmark module. Not part of the HPI build chain; the plugin jar
+        must be installed into the local Maven repository first:
+
+            mvn -f ../pom.xml install -DskipTests
+            mvn verify          (builds uber-jar then executes it)
+
+        Or run the uber-jar directly after packaging:
+
+            java -jar target/benchmarks.jar [regexp] [JMH options]
+    -->
+
+    <groupId>org.jenkinsci.plugins</groupId>
+    <artifactId>durable-task-benchmarks</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <packaging>jar</packaging>
+    <name>Durable Task Plugin – JMH Benchmarks</name>
+
+    <properties>
+        <maven.compiler.release>11</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <jmh.version>1.37</jmh.version>
+        <mockito.version>5.18.0</mockito.version>
+        <byte-buddy.version>1.17.5</byte-buddy.version>
+        <!-- JMH run defaults; override with -Dbenchmark.f=2 -Dbenchmark.wi=5 -Dbenchmark.i=10 -->
+        <benchmark.f>1</benchmark.f>
+        <benchmark.wi>3</benchmark.wi>
+        <benchmark.i>5</benchmark.i>
+        <!-- coordinates of the plugin jar built by the parent module -->
+        <plugin.groupId>org.jenkins-ci.plugins</plugin.groupId>
+        <plugin.artifactId>durable-task</plugin.artifactId>
+        <plugin.version>999999-SNAPSHOT</plugin.version>
+    </properties>
+
+    <dependencies>
+        <!-- Plugin classes under benchmark (plain jar produced alongside the hpi) -->
+        <dependency>
+            <groupId>${plugin.groupId}</groupId>
+            <artifactId>${plugin.artifactId}</artifactId>
+            <version>${plugin.version}</version>
+        </dependency>
+
+        <!-- jenkins-core: Queue, Node, Label, etc. Included in the uber-jar so the
+             forked benchmark JVM can find these classes without a running Jenkins. -->
+        <dependency>
+            <groupId>org.jenkins-ci.main</groupId>
+            <artifactId>jenkins-core</artifactId>
+            <version>2.504.3</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.jenkins-ci.main</groupId>
+                    <artifactId>jenkins-war</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- jakarta.servlet-api: required by jenkins-core at runtime in the forked JVM -->
+        <dependency>
+            <groupId>jakarta.servlet</groupId>
+            <artifactId>jakarta.servlet-api</artifactId>
+            <version>5.0.0</version>
+        </dependency>
+
+        <!-- JMH -->
+        <dependency>
+            <groupId>org.openjdk.jmh</groupId>
+            <artifactId>jmh-core</artifactId>
+            <version>${jmh.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.openjdk.jmh</groupId>
+            <artifactId>jmh-generator-annprocess</artifactId>
+            <version>${jmh.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- Mockito – used in @Setup to stub Queue.getInstance() -->
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <version>${mockito.version}</version>
+        </dependency>
+
+        <!-- Silence SLF4J "no providers" warning in the forked benchmark JVM -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+            <version>2.0.17</version>
+        </dependency>
+    </dependencies>
+
+    <repositories>
+        <repository>
+            <id>repo.jenkins-ci.org</id>
+            <url>https://repo.jenkins-ci.org/public/</url>
+        </repository>
+    </repositories>
+
+    <build>
+        <plugins>
+            <!-- Resolve byte-buddy-agent to a local-repo path property so the forked
+                 JVM can load it as -javaagent without Mockito's deprecated self-attach. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <version>3.8.1</version>
+                <executions>
+                    <execution>
+                        <id>resolve-byte-buddy-agent</id>
+                        <phase>initialize</phase>
+                        <goals><goal>properties</goal></goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+                <executions>
+                    <!-- Pass 1: compile benchmark sources; JMH processor generates harness .java files -->
+                    <execution>
+                        <id>default-compile</id>
+                        <goals><goal>compile</goal></goals>
+                        <configuration>
+                            <annotationProcessorPaths>
+                                <path>
+                                    <groupId>org.openjdk.jmh</groupId>
+                                    <artifactId>jmh-generator-annprocess</artifactId>
+                                    <version>${jmh.version}</version>
+                                </path>
+                            </annotationProcessorPaths>
+                        </configuration>
+                    </execution>
+                    <!-- Pass 2: compile the generated harness sources into target/classes -->
+                    <execution>
+                        <id>compile-jmh-generated</id>
+                        <phase>compile</phase>
+                        <goals><goal>compile</goal></goals>
+                        <configuration>
+                            <compileSourceRoots>
+                                <compileSourceRoot>${project.build.directory}/generated-sources/annotations</compileSourceRoot>
+                            </compileSourceRoots>
+                            <proc>none</proc>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Shade into a self-contained benchmarks.jar -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.6.0</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals><goal>shade</goal></goals>
+                        <configuration>
+                            <finalName>benchmarks</finalName>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>org.openjdk.jmh.Main</mainClass>
+                                </transformer>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                                <!-- JMH stores discovered benchmarks here; must not be overwritten -->
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
+                                    <resource>META-INF/BenchmarkList</resource>
+                                </transformer>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
+                                    <resource>META-INF/CompilerHints</resource>
+                                </transformer>
+                            </transformers>
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- mvn -pl benchmarks verify  runs the benchmark after packaging.
+                 Override iterations on the command line, e.g.:
+                   mvn -pl benchmarks verify -Dbenchmark.wi=5 -Dbenchmark.i=10 -Dbenchmark.f=2 -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <id>run-benchmarks</id>
+                        <phase>verify</phase>
+                        <goals><goal>exec</goal></goals>
+                        <configuration>
+                            <executable>java</executable>
+                            <arguments>
+                                <argument>-jar</argument>
+                                <argument>${project.build.directory}/benchmarks.jar</argument>
+                                <argument>-f</argument><argument>${benchmark.f}</argument>
+                                <argument>-wi</argument><argument>${benchmark.wi}</argument>
+                                <argument>-i</argument><argument>${benchmark.i}</argument>
+                                <argument>-foe</argument><argument>true</argument>
+                                <!-- Pass byte-buddy-agent to each forked JVM so Mockito's inline
+                                     mock maker does not need to self-attach (deprecated on JDK 21+).
+                                     The property is set by maven-dependency-plugin:properties above. -->
+                                <argument>-jvmArgsAppend</argument>
+                                <argument>-javaagent:${net.bytebuddy:byte-buddy-agent:jar} -XX:+EnableDynamicAgentLoading</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
